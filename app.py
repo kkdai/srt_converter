@@ -1,8 +1,14 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, request, send_file, render_template
 from werkzeug.utils import secure_filename
 import re
 from datetime import datetime, timedelta
 import io
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 
