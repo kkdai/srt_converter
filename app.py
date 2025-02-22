@@ -1,16 +1,20 @@
-from flask import Flask, request, send_file, render_template
+from flask import Flask, request, send_file, render_template, Response
 from werkzeug.utils import secure_filename
 import re
 from datetime import datetime, timedelta
 import io
 from openai import OpenAI
-from dotenv import load_dotenv
 import os
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
+import json
+from threading import Lock
 
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# 檢查環境變數是否存在
+if "OPENAI_API_KEY" not in os.environ:
+    raise ValueError("請設定 OPENAI_API_KEY 環境變數")
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 app = Flask(__name__)
 
