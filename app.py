@@ -9,6 +9,7 @@ from pydub import AudioSegment
 from pydub.silence import split_on_silence
 import json
 from threading import Lock
+import time
 
 # 檢查環境變數是否存在
 if "OPENAI_API_KEY" not in os.environ:
@@ -98,6 +99,28 @@ def convert_to_srt_file(file_path):
     return srt_content
 
 
+@app.route('/progress')
+def progress_stream():
+    def generate():
+        while True:
+            with progress["lock"]:
+                if progress["total_chunks"] > 0:
+                    percentage = (progress["processed_chunks"] / progress["total_chunks"]) * 100
+                else:
+                    percentage = 0
+                
+                data = {
+                    "progress": percentage,
+                    "processed": progress["processed_chunks"],
+                    "total": progress["total_chunks"]
+                }
+                
+            yield f"data: {json.dumps(data)}\n\n"
+            time.sleep(1)
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -105,17 +128,47 @@ def index():
 
 @app.route("/convert", methods=["POST"])
 def convert():
-    file = request.files["file"]
-    file_path = secure_filename(file.filename)
+    if 'file' not in request.files:
+        return 'No file uploaded', 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return 'No file selected', 400
+    
+    if not file.filename.lower().endswith(('.mp3', '.wav', '.m4a')):
+        return 'Invalid file type', 400
+    
+    # Reset progress
+    with progress["lock"]:
+        progress["total_chunks"] = 0
+        progress["processed_chunks"] = 0
+    
+    filename = secure_filename(file.filename)
+    file_path = os.path.join("uploads", filename)
+    os.makedirs("uploads", exist_ok=True)
     file.save(file_path)
-    # srt_content = convert_to_srt_file(file_path)
-    transcript = transcribe_audio(file_path)
-    srt_content = convert_to_srt(transcript)
-    return send_file(
-        io.BytesIO(srt_content.encode()),
-        as_attachment=True,
-        attachment_filename="output.srt",
-    )
+    
+    try:
+        transcript = transcribe_audio(file_path)
+        srt_content = convert_to_srt(transcript)
+        
+        output = io.StringIO()
+        output.write(srt_content)
+        output.seek(0)
+        
+        os.remove(file_path)
+        
+        return send_file(
+            output,
+            mimetype='text/plain',
+            as_attachment=True,
+            download_name=f"{os.path.splitext(filename)[0]}.srt"
+        )
+        
+    except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return str(e), 500
 
 
 if __name__ == "__main__":

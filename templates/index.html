@@ -1,9 +1,17 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <title>字幕轉換工具</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <style>
+        #progressContainer {
+            display: none;
+            margin-top: 20px;
+        }
+        .progress {
+            height: 25px;
+        }
+    </style>
 </head>
 
 <body class="bg-light">
@@ -13,17 +21,28 @@
                 <h2 class="text-center">SRT字幕轉換器</h2>
             </div>
             <div class="card-body">
-                <form action="/convert" method="post" enctype="multipart/form-data">
+                <form id="uploadForm" action="/convert" method="post" enctype="multipart/form-data">
                     <div class="mb-4">
-                        <label class="form-label">上傳文字檔案：</label>
-                        <input type="file" class="form-control" name="file" accept=".m4a,.mp3,.wav,.txt" required>
+                        <label class="form-label">上傳音頻檔案：</label>
+                        <input type="file" class="form-control" name="file" accept=".m4a,.mp3,.wav" required>
                     </div>
                     <div class="text-center">
-                        <button type="submit" class="btn btn-success btn-lg">
+                        <button type="submit" class="btn btn-success btn-lg" id="submitBtn">
                             <i class="bi bi-upload"></i> 轉換為SRT
                         </button>
                     </div>
                 </form>
+                
+                <div id="progressContainer">
+                    <h5 class="text-center mb-3">處理進度</h5>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: 0%" 
+                             id="progressBar">0%</div>
+                    </div>
+                    <p class="text-center mt-2" id="progressText">準備處理中...</p>
+                </div>
             </div>
             <div class="card-footer text-muted">
                 <small>支援格式範例：</small>
@@ -33,6 +52,66 @@
             </div>
         </div>
     </div>
-</body>
 
+    <script>
+        document.getElementById('uploadForm').onsubmit = function(e) {
+            e.preventDefault();
+            
+            // Show progress container and disable submit button
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('submitBtn').disabled = true;
+            
+            // Start progress monitoring
+            const eventSource = new EventSource('/progress');
+            eventSource.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                const progressBar = document.getElementById('progressBar');
+                const progressText = document.getElementById('progressText');
+                
+                const percentage = Math.round(data.progress);
+                progressBar.style.width = percentage + '%';
+                progressBar.textContent = percentage + '%';
+                
+                if (data.total > 0) {
+                    progressText.textContent = `處理中... (${data.processed}/${data.total})`;
+                }
+            };
+            
+            // Submit the form
+            const formData = new FormData(this);
+            fetch('/convert', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('轉換失敗');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Create download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'output.srt';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                
+                // Reset form state
+                eventSource.close();
+                document.getElementById('progressContainer').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('uploadForm').reset();
+            })
+            .catch(error => {
+                alert('錯誤：' + error.message);
+                eventSource.close();
+                document.getElementById('progressContainer').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+            });
+        };
+    </script>
+</body>
 </html>
