@@ -18,6 +18,7 @@ client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 app = Flask(__name__)
 
+progress = {"lock": Lock(), "total_chunks": 0, "processed_chunks": 0}
 
 def split_audio(file_path, chunk_length=600000):
     audio = AudioSegment.from_file(file_path)
@@ -26,31 +27,39 @@ def split_audio(file_path, chunk_length=600000):
 
 def transcribe_audio(file_path):
     chunks = split_audio(file_path)
+    
+    with progress["lock"]:
+        progress["total_chunks"] = len(chunks)
+        progress["processed_chunks"] = 0
+    
     full_transcript = []
-
     for i, chunk in enumerate(chunks):
         chunk_path = f"temp_chunk_{i}.mp3"
         chunk.export(chunk_path, format="mp3")
-
+        
         with open(chunk_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
                 file=audio_file,
                 model="whisper-1",
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
+                response_format="verbose_json"
             )
-
-        time_offset = i * 10 * 60
+            
+        time_offset = i * 10 * 60  # 10分鐘偏移
+        
+        # 使用正確的屬性訪問方式
         for segment in transcript.segments:
             adjusted_segment = {
-                "start": segment["start"] + time_offset,
-                "end": segment["end"] + time_offset,
-                "text": segment["text"],
+                "start": float(segment.start) + time_offset,
+                "end": float(segment.end) + time_offset,
+                "text": segment.text
             }
             full_transcript.append(adjusted_segment)
-
+            
         os.remove(chunk_path)
-
+        
+        with progress["lock"]:
+            progress["processed_chunks"] = i + 1
+            
     return full_transcript
 
 
@@ -59,7 +68,8 @@ def convert_to_srt(segments):
     for i, segment in enumerate(segments, 1):
         start = timedelta(seconds=segment["start"])
         end = timedelta(seconds=segment["end"])
-        srt_content += f"{i}\n{_format_timestamp(start)} --> {_format_timestamp(end)}\n{segment['text']}\n\n"
+        text = segment["text"].strip()
+        srt_content += f"{i}\n{_format_timestamp(start)} --> {_format_timestamp(end)}\n{text}\n\n"
     return srt_content
 
 
