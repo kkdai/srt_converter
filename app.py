@@ -10,6 +10,11 @@ from pydub.silence import split_on_silence
 import json
 from threading import Lock
 import time
+import logging
+
+# 設置日誌
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # 檢查環境變數是否存在
 if "OPENAI_API_KEY" not in os.environ:
@@ -128,47 +133,69 @@ def index():
 
 @app.route("/convert", methods=["POST"])
 def convert():
-    if 'file' not in request.files:
-        return 'No file uploaded', 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return 'No file selected', 400
-    
-    if not file.filename.lower().endswith(('.mp3', '.wav', '.m4a')):
-        return 'Invalid file type', 400
-    
-    # Reset progress
-    with progress["lock"]:
-        progress["total_chunks"] = 0
-        progress["processed_chunks"] = 0
-    
-    filename = secure_filename(file.filename)
-    file_path = os.path.join("uploads", filename)
-    os.makedirs("uploads", exist_ok=True)
-    file.save(file_path)
-    
     try:
-        transcript = transcribe_audio(file_path)
-        srt_content = convert_to_srt(transcript)
+        logger.debug("Starting convert function")
         
-        output = io.StringIO()
-        output.write(srt_content)
-        output.seek(0)
+        if 'file' not in request.files:
+            logger.error("No file part in request")
+            return 'No file uploaded', 400
         
-        os.remove(file_path)
+        file = request.files['file']
+        logger.debug(f"Received file: {file.filename}")
         
-        return send_file(
-            output,
-            mimetype='text/plain',
-            as_attachment=True,
-            download_name=f"{os.path.splitext(filename)[0]}.srt"
-        )
+        if file.filename == '':
+            logger.error("No selected file")
+            return 'No file selected', 400
         
-    except Exception as e:
-        if os.path.exists(file_path):
+        if not file.filename.lower().endswith(('.mp3', '.wav', '.m4a')):
+            logger.error(f"Invalid file type: {file.filename}")
+            return 'Invalid file type', 400
+        
+        # Reset progress
+        with progress["lock"]:
+            progress["total_chunks"] = 0
+            progress["processed_chunks"] = 0
+        
+        filename = secure_filename(file.filename)
+        file_path = os.path.join("uploads", filename)
+        logger.debug(f"Saving file to: {file_path}")
+        
+        os.makedirs("uploads", exist_ok=True)
+        file.save(file_path)
+        
+        logger.debug("Starting audio transcription")
+        try:
+            transcript = transcribe_audio(file_path)
+            logger.debug(f"Transcription completed, segments: {len(transcript)}")
+            
+            logger.debug("Converting to SRT format")
+            srt_content = convert_to_srt(transcript)
+            logger.debug("SRT conversion completed")
+            
+            output = io.StringIO()
+            output.write(srt_content)
+            output.seek(0)
+            
+            logger.debug("Cleaning up temporary file")
             os.remove(file_path)
-        return str(e), 500
+            
+            logger.debug("Sending response")
+            return send_file(
+                output,
+                mimetype='text/plain',
+                as_attachment=True,
+                download_name=f"{os.path.splitext(filename)[0]}.srt"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error during transcription/conversion: {str(e)}", exc_info=True)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return f"處理錯誤: {str(e)}", 500
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in convert function: {str(e)}", exc_info=True)
+        return f"系統錯誤: {str(e)}", 500
 
 
 if __name__ == "__main__":
